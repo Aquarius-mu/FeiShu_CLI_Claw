@@ -127,19 +127,36 @@ lark-cli im +messages-send --chat-id oc_xxx --msg-type interactive --content "$C
 
 ---
 
-## 🗄️ 缓存系统
+## 🗄️ 文件操作规范（feishu-file-ops）
 
+**写操作白名单**：仅限 `~/feishu_bot/cache/` 下三个 JSON，其余路径只读。
+
+| 文件 | TTL | 内容 |
+|------|-----|------|
+| `cache/tokens.json` | 永久 | spreadsheet / bitable / wiki token |
+| `cache/groups.json` | 30 天 | chat_id → 群名、成员数 |
+| `cache/users.json` | 7 天 | open_id → 姓名、邮箱、部门 |
+
+`sessions` · `name_cache` · `group_cache` · `warmup_session` 均为脚本专属，**只读不写**。
+
+**所有写入必须四步走**：`flock -x` 持锁 → `jq` 合并（不整体覆盖）→ 写 `.tmp` → `jq empty` 校验后 `mv` 原子替换。
+
+```bash
+(
+  flock -x 200
+  cur=$(cat ~/feishu_bot/cache/groups.json 2>/dev/null || echo "{}")
+  echo "$cur" | jq --arg id "oc_xxx" --arg name "群名" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.[$id] = ((.[$id] // {}) + {"name":$name,"updated_at":$ts})' \
+    > ~/feishu_bot/cache/groups.json.tmp \
+  && jq empty ~/feishu_bot/cache/groups.json.tmp \
+  && mv ~/feishu_bot/cache/groups.json.tmp ~/feishu_bot/cache/groups.json
+) 200>~/feishu_bot/cache/groups.lock
 ```
-~/feishu_bot/cache/
-├── tokens.json   # spreadsheet / bitable / wiki token（永久）
-├── groups.json   # chat_id + 群名（TTL 30 天）
-└── users.json    # open_id + 姓名/邮箱/部门（TTL 7 天）
-```
 
-**规范**：写操作仅限 `cache/` 三个 JSON；`sessions` / `name_cache` / `group_cache` 脚本专属只读。
-所有写入必须 `flock -x` 持锁 → `jq` 合并 → 临时文件 `mv` 原子替换。
+**禁止**：`rm` · `chmod` · `sudo` · `curl/wget` · 执行任意脚本 · 直接覆盖写 JSON
 
-**禁止**：`rm` · `chmod` · `sudo` · `curl/wget` · 执行任意脚本
+> Skill 自我改进时 Claude 可写 `~/.claude/skills/*/SKILL.md` 和 `~/.claude/lark_cli_rules.md`，但禁止修改任何 `.sh` 脚本。
 
 ---
 
